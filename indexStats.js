@@ -1,7 +1,7 @@
 DB.prototype.indexStats = function() {
   var queries = [];
   var collections = db.getCollectionNames();
-  // this could probably be made better, caching by index used instead of exact query 
+  // this could probably be made better, caching by index used instead of exact query
   // (because queries on _id for example can be all over the place)
   var findQuery = function(q) {
     for(entryIdx in queries) {
@@ -12,6 +12,58 @@ DB.prototype.indexStats = function() {
     return -1;
   }
 
+  // perform an explain on the query or aggregation
+  var getExplain = function(collection, cachedQuery, query) {
+    var explain = collection.find(cachedQuery.query).explain();
+    if(query && query["query"]) {
+      cachedQuery.sort = query['orderby'];
+      if(cachedQuery.sort) {
+        explain = collection.find(cachedQuery.query.query).sort(cachedQuery.sort).explain();
+      }
+    }
+    return explain;
+  }
+
+ // search through inputStage's for indexes
+ var findIndexes = function(plan) {
+   if(plan.inputStage) {
+     if(plan.inputStage.indexName) {
+       return {
+         stage: plan.inputStage.stage,
+         indexName: plan.inputStage.indexName
+       };
+     } else {
+       return findIndexes(plan.inputStage);
+     }
+   } else {
+     return {
+       stage: plan.stage
+     };
+   }
+ }
+
+  // process the query, figure out if we've seen it already, if not check the
+  // the explain details
+  var queryProcessor = function(query, queries, nsName) {
+    var qIdx = findQuery(query);
+    if(qIdx == -1) {
+      var size = queries.push({query:query, count:1, index:""});
+      var explain = getExplain(db[cName], queries[size-1], query);
+
+      // Find if there are indexes used, and stages without indexes
+      var indexes = findIndexes(explain.queryPlanner.winningPlan);
+      if(indexes.indexName) {
+        queries[size-1].index = indexes.indexName;
+      } else {
+        print('warning, no index for query {ns:"'+nsName+'"}: ');
+        print("... scan type (stage): " + indexes.stage);
+        printjson(query);
+      }
+    } else {
+      queries[qIdx].count++;
+    }
+  }
+
   for(cIdx in collections) {
     var cName = collections[cIdx];
     var nsName = db.getName()+"."+cName;
@@ -19,36 +71,19 @@ DB.prototype.indexStats = function() {
       var i = 1;
       var count = db.system.profile.count({ns:nsName});
       print('scanning profile {ns:"'+nsName+'"} with '+count+" records... this could take a while.");
-      db.system.profile.find({ns:nsName}).addOption(16).batchSize(10000).forEach(function(profileDoc) {
-        if(profileDoc.query && !profileDoc.query["$explain"]) { 
-          var qIdx = findQuery(profileDoc.query);
-          if(qIdx == -1) {
-            var size = queries.push({query:profileDoc.query, count:1, index:""});
-            var explain = db[cName].find(queries[size-1].query).explain();
-            if(profileDoc.query && profileDoc.query["query"]) {
-              queries[size-1].sort = profileDoc.query['orderby'];
-              if(queries[size-1].sort) {
-                explain = db[cName].find(queries[size-1].query.query).sort(queries[size-1].sort).explain();
-              }
+      db.system.profile.find({op: 'command', ns:db.getName()+'.$cmd', 'command.aggregate':cName}).addOption(16).batchSize(10000).forEach(function(profileDoc) {
+        if(!profileDoc.command.explain) {
+          profileDoc.command.pipeline.forEach(function(pipeline) {
+            // We're only interested in the match pipelines
+            if(pipeline["$match"]) {
+              queryProcessor(pipeline["$match"], queries, nsName);
             }
-            queries[size-1].cursor = explain.cursor;
-            queries[size-1].millis = explain.millis;
-            queries[size-1].nscanned = explain.nscanned;
-            queries[size-1].n = explain.n;
-            queries[size-1].scanAndOrder = explain.scanAndOrder ? true : false;
-            if(explain.cursor && explain.cursor != "BasicCursor") {
-              queries[size-1].index = explain.cursor.split(" ")[1];
-              //print("found index in use: " + queries[size-1].index); 
-            } else {
-              print('warning, no index for query {ns:"'+nsName+'"}: ');
-              printjson(profileDoc.query);
-              print("... millis: " + queries[size-1].millis);
-              print("... nscanned/n: " + queries[size-1].nscanned + "/" + queries[size-1].n);
-              print("... scanAndOrder: " + queries[size-1].scanAndOrder);
-            }
-          } else {
-            queries[qIdx].count++;
-          }
+          });
+        }
+      });
+      db.system.profile.find({op:'query', ns:nsName}).addOption(16).batchSize(10000).forEach(function(profileDoc) {
+        if(!profileDoc.query["$explain"]) {
+          queryProcessor(profileDoc.query, queries, nsName);
         }
       });
     }
@@ -70,11 +105,14 @@ DB.prototype.indexStats = function() {
             }
           }
           if(!found) {
-            print("this index is not being used: ");
-            printjson(iName);
+            print("----- this index is not being used: ");
+          } else {
+            print("+++++ this index was used "+queries[qIdx].count+" times");
           }
+          printjson(iName);
         }
       }
     }
   }
 }
+
