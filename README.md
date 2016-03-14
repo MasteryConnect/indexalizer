@@ -1,12 +1,12 @@
 indexalizer
 ===========
 
-index analyzer for mongodb
+index analyzer for mongodb 3.x
 
 usage
 ===========
 
-Step 1: In the db you'd like to analyze, from the mongo shell, run `db.setProfilingLevel(2);` 
+Step 1: In the db you'd like to analyze, from the mongo shell, run `db.setProfilingLevel(2);`
 (be careful if you're doing this in a production system, because it will affect performance)
 
 Step 2: So far this only has a couple of hours put into it--a lot more to come. For now, you can copy the javascript in
@@ -28,22 +28,16 @@ $ mongo mongochess --shell indexStats.js
 ...
 > db.indexStats();
 scanning profile {ns:"mongochess.positions"} with 3351 records... this could take a while.
-warning, no index for query {ns:"mongochess.positions"}: 
+warning, no index for query {ns:"mongochess.positions"}:
 { "query" : { "moves.score" : 2 }, "orderby" : { "bestScore" : 1 } }
-... millis: 47
-... nscanned/n: 16334/0
-... scanAndOrder: true
-warning, no index for query {ns:"mongochess.positions"}: 
+warning, no index for query {ns:"mongochess.positions"}:
 { "moves.score" : 2 }
-... millis: 48
-... nscanned/n: 16334/0
-... scanAndOrder: false
 checking for unused indexes in: positions
-this index is not being used: 
+this index is not being used:
 "priority_1"
-this index is not being used: 
+this index is not being used:
 "minMoves_1"
-this index is not being used: 
+this index is not being used:
 "maxDepth_1_forcedDraw_1_claimed_1_priority_-1_minMoves_1_bestScore_1"
 ```
 
