@@ -3,6 +3,8 @@ indexalizer
 
 index analyzer for mongodb 3.x
 
+Here [freeeve/indexalizer](https://github.com/freeeve/indexalizer) version is updated to have basic support for MongoDB 3.x and to check aggregation pipeline $match queries.
+
 usage
 ===========
 
